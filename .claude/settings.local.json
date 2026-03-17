@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser\")",
+      "Bash(python:*)",
+      "Bash(pip list:*)",
+      "Bash(node:*)",
+      "Bash(mkdir:*)",
+      "Bash(cd:*)"
+    ]
+  }
+}

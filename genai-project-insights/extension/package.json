@@ -1,0 +1,174 @@
+{
+  "name": "genai-project-insights",
+  "displayName": "GenAI Project Insights",
+  "description": "AI-powered project analysis for GenAI developers. Understand your codebase, explain code, chat with your project, and track activity.",
+  "version": "1.0.0",
+  "publisher": "genai-insights",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "ai",
+    "genai",
+    "project analysis",
+    "code explanation",
+    "claude",
+    "openai",
+    "gemini"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "genai.scanProject",
+        "title": "GenAI: Scan & Summarize Project",
+        "icon": "$(search)"
+      },
+      {
+        "command": "genai.explainCode",
+        "title": "GenAI: Explain Selected Code",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "genai.openChat",
+        "title": "GenAI: Open Project Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "genai.gitInsights",
+        "title": "GenAI: Show Git Insights",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "genai.findTodos",
+        "title": "GenAI: Find & List TODOs",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "genai.pickProvider",
+        "title": "GenAI: Switch AI Provider",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "genai.startBackend",
+        "title": "GenAI: Start Backend Server",
+        "icon": "$(play)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "genai.explainCode",
+          "when": "editorHasSelection",
+          "group": "genai@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "genai.explainCode",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "genai-sidebar",
+          "title": "GenAI Insights",
+          "icon": "$(sparkle)"
+        }
+      ]
+    },
+    "views": {
+      "genai-sidebar": [
+        {
+          "id": "genai.activityView",
+          "name": "File Activity",
+          "icon": "$(pulse)"
+        },
+        {
+          "id": "genai.todoView",
+          "name": "TODOs & FIXMEs",
+          "icon": "$(checklist)"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GenAI Project Insights",
+      "properties": {
+        "genai.provider": {
+          "type": "string",
+          "enum": ["anthropic", "openai", "gemini", "ollama"],
+          "default": "anthropic",
+          "description": "AI provider to use for analysis"
+        },
+        "genai.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic API key (Claude models)",
+          "markdownDescription": "Anthropic API key. Get one at https://console.anthropic.com"
+        },
+        "genai.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API key (GPT models)",
+          "markdownDescription": "OpenAI API key. Get one at https://platform.openai.com"
+        },
+        "genai.geminiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Google Gemini API key",
+          "markdownDescription": "Google Gemini API key. Get one at https://aistudio.google.com"
+        },
+        "genai.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama server URL (for local models)"
+        },
+        "genai.ollamaModel": {
+          "type": "string",
+          "default": "llama3",
+          "description": "Ollama model name"
+        },
+        "genai.backendPort": {
+          "type": "number",
+          "default": 8765,
+          "description": "Port for the Python backend server"
+        },
+        "genai.autoStartBackend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the Python backend when VS Code opens"
+        },
+        "genai.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Python interpreter. Leave empty to auto-detect."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
