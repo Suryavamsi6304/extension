@@ -88,7 +88,7 @@ export class ServerManager {
 
   private async start(): Promise<void> {
     const pythonPath = this.resolvePython();
-    const backendDir = path.join(this.extensionPath, "..", "backend");
+    const backendDir = path.join(this.extensionPath, "backend");
 
     if (!fs.existsSync(backendDir)) {
       const msg = `Backend directory not found: ${backendDir}`;

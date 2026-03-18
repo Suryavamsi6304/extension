@@ -113,10 +113,7 @@ export class OverviewPanel {
         </div>`)
       .join("");
 
-    const summaryHtml = data.summary
-      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/\n\n/g, '</p><p>');
+    const summaryHtml = renderMarkdown(data.summary);
 
     return `<!DOCTYPE html>
 <html>
@@ -134,15 +131,21 @@ export class OverviewPanel {
     }
     h1 { color: var(--vscode-titleBar-activeForeground); font-size: 1.4em; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 8px; }
     h2 { font-size: 1.1em; color: var(--vscode-textLink-foreground); margin-top: 24px; }
-    h3 { font-size: 1em; margin: 12px 0 4px; }
+    h3 { font-size: 1em; margin: 12px 0 4px; color: var(--vscode-textLink-foreground); }
+    h4 { font-size: 0.95em; margin: 10px 0 4px; }
     .meta { color: var(--vscode-descriptionForeground); font-size: 0.9em; margin-bottom: 16px; }
     .summary-box {
       background: var(--vscode-textBlockQuote-background);
       border-left: 3px solid var(--vscode-textLink-foreground);
-      padding: 16px;
+      padding: 16px 20px;
       border-radius: 0 4px 4px 0;
-      line-height: 1.6;
+      line-height: 1.7;
     }
+    .summary-box p { margin: 4px 0; }
+    .summary-box ul, .summary-box ol { padding-left: 20px; margin: 4px 0 8px; }
+    .summary-box li { margin: 3px 0; }
+    .summary-box h3 { margin-top: 14px; }
+    .summary-box code { background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
     .card {
       background: var(--vscode-sideBar-background);
@@ -230,4 +233,55 @@ function escapeHtml(str: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderMarkdown(text: string): string {
+  const lines = text.split("\n");
+  const html: string[] = [];
+  let inList = false;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+
+    // H2
+    if (/^## (.+)/.test(line)) {
+      if (inList) { html.push("</ul>"); inList = false; }
+      html.push(`<h3>${inlineFormat(line.replace(/^## /, ""))}</h3>`);
+    }
+    // H3
+    else if (/^### (.+)/.test(line)) {
+      if (inList) { html.push("</ul>"); inList = false; }
+      html.push(`<h4>${inlineFormat(line.replace(/^### /, ""))}</h4>`);
+    }
+    // Bullet
+    else if (/^[-*] (.+)/.test(line)) {
+      if (!inList) { html.push("<ul>"); inList = true; }
+      html.push(`<li>${inlineFormat(line.replace(/^[-*] /, ""))}</li>`);
+    }
+    // Numbered list
+    else if (/^\d+\. (.+)/.test(line)) {
+      if (!inList) { html.push("<ol>"); inList = true; }
+      html.push(`<li>${inlineFormat(line.replace(/^\d+\. /, ""))}</li>`);
+    }
+    // Blank line
+    else if (line.trim() === "") {
+      if (inList) { html.push(inList ? "</ul>" : "</ol>"); inList = false; }
+      html.push("<br>");
+    }
+    // Normal paragraph line
+    else {
+      if (inList) { html.push("</ul>"); inList = false; }
+      html.push(`<p>${inlineFormat(line)}</p>`);
+    }
+  }
+
+  if (inList) html.push("</ul>");
+  return html.join("\n");
+}
+
+function inlineFormat(text: string): string {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>");
 }

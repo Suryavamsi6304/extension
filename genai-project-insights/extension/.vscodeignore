@@ -1,0 +1,15 @@
+.vscode/**
+.github/**
+src/**
+node_modules/**
+*.vsix
+tsconfig.json
+.eslintrc*
+.prettierrc*
+**/*.map
+**/*.ts
+!out/**
+backend/__pycache__/**
+backend/**/__pycache__/**
+backend/**/*.pyc
+backend/.env

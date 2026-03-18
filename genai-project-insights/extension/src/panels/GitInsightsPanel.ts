@@ -85,7 +85,7 @@ export class GitInsightsPanel {
       .join("");
 
     const summaryHtml = data.ai_summary
-      ? data.ai_summary.replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")
+      ? renderMarkdown(data.ai_summary)
       : "";
 
     return `<!DOCTYPE html>
@@ -115,10 +115,15 @@ export class GitInsightsPanel {
     .summary-box {
       background: var(--vscode-textBlockQuote-background);
       border-left: 3px solid var(--vscode-textLink-foreground);
-      padding: 16px;
+      padding: 16px 20px;
       border-radius: 0 4px 4px 0;
-      line-height: 1.6;
+      line-height: 1.7;
     }
+    .summary-box p { margin: 4px 0; }
+    .summary-box ul, .summary-box ol { padding-left: 20px; margin: 4px 0 8px; }
+    .summary-box li { margin: 3px 0; }
+    .summary-box h3 { margin-top: 14px; color: var(--vscode-textLink-foreground); }
+    .summary-box code { background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
     .commit {
       background: var(--vscode-sideBar-background);
       border: 1px solid var(--vscode-panel-border);
@@ -154,7 +159,7 @@ export class GitInsightsPanel {
 
   ${summaryHtml ? `
   <h2>AI Summary</h2>
-  <div class="summary-box"><p>${summaryHtml}</p></div>
+  <div class="summary-box">${summaryHtml}</div>
   ` : ""}
 
   <h2>Recent Commits (${data.commits.length})</h2>
@@ -176,4 +181,43 @@ function escapeHtml(str: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderMarkdown(text: string): string {
+  const lines = text.split("\n");
+  const html: string[] = [];
+  let inList = false;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (/^## (.+)/.test(line)) {
+      if (inList) { html.push("</ul>"); inList = false; }
+      html.push(`<h3>${inlineFormat(line.replace(/^## /, ""))}</h3>`);
+    } else if (/^### (.+)/.test(line)) {
+      if (inList) { html.push("</ul>"); inList = false; }
+      html.push(`<h4>${inlineFormat(line.replace(/^### /, ""))}</h4>`);
+    } else if (/^[-*] (.+)/.test(line)) {
+      if (!inList) { html.push("<ul>"); inList = true; }
+      html.push(`<li>${inlineFormat(line.replace(/^[-*] /, ""))}</li>`);
+    } else if (/^\d+\. (.+)/.test(line)) {
+      if (!inList) { html.push("<ol>"); inList = true; }
+      html.push(`<li>${inlineFormat(line.replace(/^\d+\. /, ""))}</li>`);
+    } else if (line.trim() === "") {
+      if (inList) { html.push("</ul>"); inList = false; }
+      html.push("<br>");
+    } else {
+      if (inList) { html.push("</ul>"); inList = false; }
+      html.push(`<p>${inlineFormat(line)}</p>`);
+    }
+  }
+
+  if (inList) html.push("</ul>");
+  return html.join("\n");
+}
+
+function inlineFormat(text: string): string {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>");
 }

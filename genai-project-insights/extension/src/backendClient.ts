@@ -23,10 +23,11 @@ export class BackendClient {
   private getConfig() {
     const cfg = vscode.workspace.getConfiguration("genai");
     return {
-      provider: cfg.get<string>("provider", "anthropic"),
+      provider: cfg.get<string>("provider", "pluralsight"),
       anthropicKey: cfg.get<string>("anthropicApiKey", ""),
       openaiKey: cfg.get<string>("openaiApiKey", ""),
       geminiKey: cfg.get<string>("geminiApiKey", ""),
+      pluralsightKey: cfg.get<string>("pluralsightApiKey", ""),
     };
   }
 
@@ -36,6 +37,7 @@ export class BackendClient {
       case "anthropic": return cfg.anthropicKey;
       case "openai": return cfg.openaiKey;
       case "gemini": return cfg.geminiKey;
+      case "pluralsight": return cfg.pluralsightKey;
       default: return "";
     }
   }
