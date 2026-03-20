@@ -1,5 +1,8 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:
     from git import Repo, InvalidGitRepositoryError
@@ -36,8 +39,8 @@ def get_git_insights(workspace_path: str, max_commits: int = 20) -> dict:
                 try:
                     diff = commit.parents[0].diff(commit)
                     changed = [d.a_path or d.b_path for d in diff if d.a_path or d.b_path]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("[git] diff error commit=%s: %s", commit.hexsha[:7], e)
             commits.append(CommitInfo(
                 hash=commit.hexsha[:7],
                 author=str(commit.author.name),
@@ -46,6 +49,7 @@ def get_git_insights(workspace_path: str, max_commits: int = 20) -> dict:
                 files_changed=changed[:10],
             ))
     except Exception as e:
+        logger.warning("[git] iter_commits error: %s", e)
         commits = []
 
     try:
@@ -58,7 +62,8 @@ def get_git_insights(workspace_path: str, max_commits: int = 20) -> dict:
     try:
         dirty_files = [item.a_path for item in repo.index.diff(None)]
         dirty_files += [f for f in repo.untracked_files]
-    except Exception:
+    except Exception as e:
+        logger.warning("[git] dirty_files error: %s", e)
         dirty_files = []
 
     return {

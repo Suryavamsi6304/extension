@@ -23,9 +23,7 @@ export class BackendClient {
   private getConfig() {
     const cfg = vscode.workspace.getConfiguration("genai");
     return {
-      provider: cfg.get<string>("provider", "pluralsight"),
-      anthropicKey: cfg.get<string>("anthropicApiKey", ""),
-      openaiKey: cfg.get<string>("openaiApiKey", ""),
+      provider: cfg.get<string>("provider", ""),
       geminiKey: cfg.get<string>("geminiApiKey", ""),
       pluralsightKey: cfg.get<string>("pluralsightApiKey", ""),
     };
@@ -34,8 +32,6 @@ export class BackendClient {
   private getApiKey(provider: string): string {
     const cfg = this.getConfig();
     switch (provider) {
-      case "anthropic": return cfg.anthropicKey;
-      case "openai": return cfg.openaiKey;
       case "gemini": return cfg.geminiKey;
       case "pluralsight": return cfg.pluralsightKey;
       default: return "";
@@ -91,10 +87,12 @@ export class BackendClient {
 
   async scanProject(workspacePath: string): Promise<ProjectOverview> {
     const cfg = this.getConfig();
+    const provider = cfg.provider || null;
+    const api_key = provider ? this.getApiKey(provider) || null : null;
     return this.fetchJson<ProjectOverview>("POST", "/project/scan", {
       workspace_path: workspacePath,
-      provider: cfg.provider,
-      api_key: this.getApiKey(cfg.provider),
+      provider,
+      api_key,
     });
   }
 
@@ -104,21 +102,25 @@ export class BackendClient {
     filePath: string
   ): Promise<ExplainResult> {
     const cfg = this.getConfig();
+    const provider = cfg.provider || null;
+    const api_key = provider ? this.getApiKey(provider) || null : null;
     return this.fetchJson<ExplainResult>("POST", "/explain", {
       code,
       language,
       file_path: filePath,
-      provider: cfg.provider,
-      api_key: this.getApiKey(cfg.provider),
+      provider,
+      api_key,
     });
   }
 
   async getGitInsights(workspacePath: string): Promise<GitInsights> {
     const cfg = this.getConfig();
+    const provider = cfg.provider || null;
+    const api_key = provider ? this.getApiKey(provider) || null : null;
     return this.fetchJson<GitInsights>("POST", "/git/insights", {
       workspace_path: workspacePath,
-      provider: cfg.provider,
-      api_key: this.getApiKey(cfg.provider),
+      provider,
+      api_key,
     });
   }
 
@@ -150,12 +152,14 @@ export class BackendClient {
     history: ChatMessage[]
   ): AsyncGenerator<string> {
     const cfg = this.getConfig();
+    const provider = cfg.provider || null;
+    const api_key = provider ? this.getApiKey(provider) || null : null;
     const body = JSON.stringify({
       message,
       workspace_path: workspacePath,
       history,
-      provider: cfg.provider,
-      api_key: this.getApiKey(cfg.provider),
+      provider,
+      api_key,
     });
 
     const buffer = await new Promise<string>((resolve, reject) => {
@@ -218,12 +222,14 @@ export class BackendClient {
     onError: (error: Error) => void
   ): void {
     const cfg = this.getConfig();
+    const provider = cfg.provider || null;
+    const api_key = provider ? this.getApiKey(provider) || null : null;
     const body = JSON.stringify({
       message,
       workspace_path: workspacePath,
       history,
-      provider: cfg.provider,
-      api_key: this.getApiKey(cfg.provider),
+      provider,
+      api_key,
     });
 
     const url = new URL(this.baseUrl + "/chat");
@@ -239,6 +245,9 @@ export class BackendClient {
       },
     };
 
+    let doneCalled = false;
+    const callDoneOnce = () => { if (!doneCalled) { doneCalled = true; onDone(); } };
+
     const req = http.request(options, (res) => {
       let partial = "";
 
@@ -251,7 +260,7 @@ export class BackendClient {
           if (line.startsWith("data: ")) {
             const data = line.slice(6).trim();
             if (data === "[DONE]") {
-              onDone();
+              callDoneOnce();
               return;
             }
             try {
@@ -268,7 +277,7 @@ export class BackendClient {
         }
       });
 
-      res.on("end", onDone);
+      res.on("end", callDoneOnce);
       res.on("error", onError);
     });
 

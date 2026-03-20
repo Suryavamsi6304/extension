@@ -1,4 +1,5 @@
-import asyncio
+import logging
+import logging.config
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,13 +8,29 @@ from config import get_settings
 from routers import project, explain, activity, chat, git, todos
 from services.watcher import file_watcher
 
+logging.config.dictConfig({
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {
+            "format": '{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}'
+        }
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "json"}
+    },
+    "root": {"level": "INFO", "handlers": ["console"]},
+})
+
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: nothing blocking
+    logger.info("[startup] GenAI Project Insights backend starting")
     yield
-    # Shutdown: stop file watcher
     file_watcher.stop()
+    logger.info("[shutdown] backend stopped")
 
 
 app = FastAPI(
@@ -23,7 +40,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow VS Code webviews and localhost dev
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -37,7 +53,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount routers
 app.include_router(project.router,  prefix="/project",  tags=["Project"])
 app.include_router(explain.router,  prefix="/explain",  tags=["Explain"])
 app.include_router(activity.router, prefix="/activity", tags=["Activity"])
@@ -59,15 +74,11 @@ async def health():
 
 @app.get("/providers", tags=["Config"])
 async def list_providers():
-    """List available providers and which ones have keys configured."""
     settings = get_settings()
     return {
         "current": settings.ai_provider,
         "available": {
-            "anthropic": bool(settings.anthropic_api_key),
-            "openai": bool(settings.openai_api_key),
             "gemini": bool(settings.gemini_api_key),
-            "ollama": True,  # No key needed
             "pluralsight": bool(settings.pluralsight_api_key),
         },
     }

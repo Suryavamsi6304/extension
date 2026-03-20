@@ -1,7 +1,10 @@
 import os
 import json
+import logging
 from pathlib import Path
 from typing import TypedDict
+
+logger = logging.getLogger(__name__)
 
 IGNORE_DIRS = {
     ".git", "__pycache__", "node_modules", ".venv", "venv", "env",
@@ -35,6 +38,10 @@ class ProjectContext(TypedDict):
 
 def scan_project(root: str, max_depth: int = 6) -> ProjectContext:
     root_path = Path(root).resolve()
+    if not root_path.exists():
+        raise FileNotFoundError(f"Workspace path does not exist: {root}")
+    if not root_path.is_dir():
+        raise NotADirectoryError(f"Workspace path is not a directory: {root}")
     tree_lines: list[str] = []
     lang_counts: dict[str, int] = {}
     file_count = 0
@@ -83,53 +90,120 @@ def _read_readme(root: Path) -> str:
 
 def _parse_dependencies(root: Path) -> dict:
     deps: dict[str, list[str]] = {}
+    _collect_python_deps(root, deps)
+    _collect_node_deps(root, deps)
+    _collect_rust_deps(root, deps)
+    _collect_go_deps(root, deps)
+    if not deps:
+        logger.warning("[scanner] no dependency files found under %s", root)
+    return deps
 
-    # Python
-    for req_file in ["requirements.txt", "requirements-dev.txt", "Pipfile"]:
-        p = root / req_file
-        if p.exists():
-            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-            deps["python"] = [
-                l.strip() for l in lines
-                if l.strip() and not l.startswith("#") and not l.startswith("-")
-            ][:50]
-            break
 
-    # Node
-    pkg = root / "package.json"
-    if pkg.exists():
+def _iter_files(root: Path, filename: str):
+    """Yield all files named `filename` under root, skipping ignored dirs."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+        if filename in filenames:
+            yield Path(dirpath) / filename
+
+
+def _collect_python_deps(root: Path, deps: dict) -> None:
+    python_pkgs: list[str] = []
+    for candidate in ["requirements.txt", "requirements-dev.txt", "requirements-test.txt"]:
+        for p in _iter_files(root, candidate):
+            try:
+                lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+                python_pkgs += [
+                    l.strip() for l in lines
+                    if l.strip() and not l.startswith("#") and not l.startswith("-")
+                ]
+            except Exception as e:
+                logger.warning("[scanner] failed to read %s: %s", p, e)
+    # poetry.lock: extract package names from [[package]] blocks
+    for p in _iter_files(root, "poetry.lock"):
         try:
-            data = json.loads(pkg.read_text(encoding="utf-8"))
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line in lines:
+                if line.startswith("name = "):
+                    python_pkgs.append(line.split("=", 1)[1].strip().strip('"'))
+        except Exception as e:
+            logger.warning("[scanner] failed to read %s: %s", p, e)
+    # Pipfile
+    for p in _iter_files(root, "Pipfile"):
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            in_section = False
+            for line in lines:
+                if line.strip() in ("[packages]", "[dev-packages]"):
+                    in_section = True
+                elif line.startswith("["):
+                    in_section = False
+                elif in_section and "=" in line:
+                    python_pkgs.append(line.split("=")[0].strip())
+        except Exception as e:
+            logger.warning("[scanner] failed to read %s: %s", p, e)
+    seen: set[str] = set()
+    unique = [x for x in python_pkgs if x not in seen and not seen.add(x)]  # type: ignore[func-returns-value]
+    if unique:
+        deps["python"] = unique[:50]
+
+
+def _collect_node_deps(root: Path, deps: dict) -> None:
+    node_pkgs: list[str] = []
+    for p in _iter_files(root, "package.json"):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            # Skip workspace root package.json that only has workspaces key
             all_deps = {
                 **data.get("dependencies", {}),
                 **data.get("devDependencies", {}),
+                **data.get("peerDependencies", {}),
             }
-            deps["node"] = list(all_deps.keys())[:50]
-        except json.JSONDecodeError:
-            pass
+            node_pkgs += list(all_deps.keys())
+        except Exception as e:
+            logger.warning("[scanner] failed to read %s: %s", p, e)
+    seen: set[str] = set()
+    unique = [x for x in node_pkgs if x not in seen and not seen.add(x)]  # type: ignore[func-returns-value]
+    if unique:
+        deps["node"] = unique[:50]
 
-    # Rust
-    cargo = root / "Cargo.toml"
-    if cargo.exists():
-        lines = cargo.read_text(encoding="utf-8", errors="replace").splitlines()
-        rust_deps = []
-        in_deps = False
-        for line in lines:
-            if line.strip() == "[dependencies]":
-                in_deps = True
-            elif line.startswith("[") and in_deps:
-                in_deps = False
-            elif in_deps and "=" in line:
-                rust_deps.append(line.split("=")[0].strip())
-        if rust_deps:
-            deps["rust"] = rust_deps[:50]
 
-    # Go
-    gomod = root / "go.mod"
-    if gomod.exists():
-        lines = gomod.read_text(encoding="utf-8", errors="replace").splitlines()
-        go_deps = [l.strip().split()[0] for l in lines if l.startswith("\t") and "/" in l]
-        if go_deps:
-            deps["go"] = go_deps[:50]
+def _collect_rust_deps(root: Path, deps: dict) -> None:
+    rust_pkgs: list[str] = []
+    for p in _iter_files(root, "Cargo.toml"):
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            in_deps = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped in ("[dependencies]", "[dev-dependencies]", "[build-dependencies]"):
+                    in_deps = True
+                elif stripped.startswith("[") and in_deps:
+                    in_deps = False
+                elif in_deps and "=" in stripped and not stripped.startswith("#"):
+                    rust_pkgs.append(stripped.split("=")[0].strip())
+        except Exception as e:
+            logger.warning("[scanner] failed to read %s: %s", p, e)
+    seen: set[str] = set()
+    unique = [x for x in rust_pkgs if x not in seen and not seen.add(x)]  # type: ignore[func-returns-value]
+    if unique:
+        deps["rust"] = unique[:50]
 
-    return deps
+
+def _collect_go_deps(root: Path, deps: dict) -> None:
+    go_pkgs: list[str] = []
+    for p in _iter_files(root, "go.mod"):
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("require ") and "/" in stripped:
+                    go_pkgs.append(stripped.split()[1])
+                elif line.startswith("\t") and "/" in line:
+                    go_pkgs.append(stripped.split()[0])
+        except Exception as e:
+            logger.warning("[scanner] failed to read %s: %s", p, e)
+    seen: set[str] = set()
+    unique = [x for x in go_pkgs if x not in seen and not seen.add(x)]  # type: ignore[func-returns-value]
+    if unique:
+        deps["go"] = unique[:50]

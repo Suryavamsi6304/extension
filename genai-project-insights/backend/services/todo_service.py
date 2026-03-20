@@ -1,6 +1,9 @@
+import logging
 import re
 from pathlib import Path
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 PATTERN = re.compile(r"\b(TODO|FIXME|HACK|BUG|NOTE|XXX)\b[:\s]*(.*)", re.IGNORECASE)
 
@@ -40,7 +43,8 @@ def find_todos(workspace_path: str) -> list[TodoItem]:
 
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except Exception:
+        except Exception as e:
+            logger.warning("[todo] failed to read %s: %s", path, e)
             continue
 
         for i, line in enumerate(lines):

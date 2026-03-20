@@ -44,9 +44,7 @@ class BackendClient {
     getConfig() {
         const cfg = vscode.workspace.getConfiguration("genai");
         return {
-            provider: cfg.get("provider", "pluralsight"),
-            anthropicKey: cfg.get("anthropicApiKey", ""),
-            openaiKey: cfg.get("openaiApiKey", ""),
+            provider: cfg.get("provider", ""),
             geminiKey: cfg.get("geminiApiKey", ""),
             pluralsightKey: cfg.get("pluralsightApiKey", ""),
         };
@@ -54,8 +52,6 @@ class BackendClient {
     getApiKey(provider) {
         const cfg = this.getConfig();
         switch (provider) {
-            case "anthropic": return cfg.anthropicKey;
-            case "openai": return cfg.openaiKey;
             case "gemini": return cfg.geminiKey;
             case "pluralsight": return cfg.pluralsightKey;
             default: return "";
@@ -102,28 +98,34 @@ class BackendClient {
     }
     async scanProject(workspacePath) {
         const cfg = this.getConfig();
+        const provider = cfg.provider || null;
+        const api_key = provider ? this.getApiKey(provider) || null : null;
         return this.fetchJson("POST", "/project/scan", {
             workspace_path: workspacePath,
-            provider: cfg.provider,
-            api_key: this.getApiKey(cfg.provider),
+            provider,
+            api_key,
         });
     }
     async explainCode(code, language, filePath) {
         const cfg = this.getConfig();
+        const provider = cfg.provider || null;
+        const api_key = provider ? this.getApiKey(provider) || null : null;
         return this.fetchJson("POST", "/explain", {
             code,
             language,
             file_path: filePath,
-            provider: cfg.provider,
-            api_key: this.getApiKey(cfg.provider),
+            provider,
+            api_key,
         });
     }
     async getGitInsights(workspacePath) {
         const cfg = this.getConfig();
+        const provider = cfg.provider || null;
+        const api_key = provider ? this.getApiKey(provider) || null : null;
         return this.fetchJson("POST", "/git/insights", {
             workspace_path: workspacePath,
-            provider: cfg.provider,
-            api_key: this.getApiKey(cfg.provider),
+            provider,
+            api_key,
         });
     }
     async getActivity(limit = 50) {
@@ -143,12 +145,14 @@ class BackendClient {
      */
     async *chatStream(message, workspacePath, history) {
         const cfg = this.getConfig();
+        const provider = cfg.provider || null;
+        const api_key = provider ? this.getApiKey(provider) || null : null;
         const body = JSON.stringify({
             message,
             workspace_path: workspacePath,
             history,
-            provider: cfg.provider,
-            api_key: this.getApiKey(cfg.provider),
+            provider,
+            api_key,
         });
         const buffer = await new Promise((resolve, reject) => {
             const url = new URL(this.baseUrl + "/chat");
@@ -203,12 +207,14 @@ class BackendClient {
      */
     chatStreamCallback(message, workspacePath, history, onToken, onDone, onError) {
         const cfg = this.getConfig();
+        const provider = cfg.provider || null;
+        const api_key = provider ? this.getApiKey(provider) || null : null;
         const body = JSON.stringify({
             message,
             workspace_path: workspacePath,
             history,
-            provider: cfg.provider,
-            api_key: this.getApiKey(cfg.provider),
+            provider,
+            api_key,
         });
         const url = new URL(this.baseUrl + "/chat");
         const options = {
@@ -222,6 +228,11 @@ class BackendClient {
                 "Content-Length": Buffer.byteLength(body),
             },
         };
+        let doneCalled = false;
+        const callDoneOnce = () => { if (!doneCalled) {
+            doneCalled = true;
+            onDone();
+        } };
         const req = http.request(options, (res) => {
             let partial = "";
             res.on("data", (chunk) => {
@@ -232,7 +243,7 @@ class BackendClient {
                     if (line.startsWith("data: ")) {
                         const data = line.slice(6).trim();
                         if (data === "[DONE]") {
-                            onDone();
+                            callDoneOnce();
                             return;
                         }
                         try {
@@ -250,7 +261,7 @@ class BackendClient {
                     }
                 }
             });
-            res.on("end", onDone);
+            res.on("end", callDoneOnce);
             res.on("error", onError);
         });
         req.on("error", onError);

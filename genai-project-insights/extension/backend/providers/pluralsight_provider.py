@@ -41,10 +41,6 @@ class PluralsightProvider(AIProvider):
             )
             resp.raise_for_status()
             data = resp.json()
-            print(f"[Pluralsight] raw response keys: {list(data.keys())}")
-            print(f"[Pluralsight] raw response: {str(data)[:500]}")
-            # chatgpt-4o returns {"message": {"content": "..."}} or {"response": "..."}
-            # bedrock models return {"message": "..."}
             if "response" in data:
                 return str(data["response"])
             msg = data.get("message", "")
@@ -58,6 +54,6 @@ class PluralsightProvider(AIProvider):
         user_message: str,
         history: list[dict] | None = None,
     ) -> AsyncIterator[str]:
-        # Proxy API does not support streaming — yield full response as one chunk
+        # Pluralsight proxy does not support streaming — yield full response as one chunk
         result = await self.complete(system_prompt, user_message)
         yield result

@@ -1,9 +1,13 @@
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+import logging
+
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
+
+logger = logging.getLogger(__name__)
 
 IGNORE_PATHS = {".git", "__pycache__", ".pyc", "node_modules", ".venv", "dist", "build"}
 
@@ -12,7 +16,7 @@ IGNORE_PATHS = {".git", "__pycache__", ".pyc", "node_modules", ".venv", "dist", 
 class ActivityItem:
     event_type: str   # created | modified | deleted | moved
     path: str
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict:
         return {
@@ -48,16 +52,17 @@ class _EventHandler(FileSystemEventHandler):
         for callback in list(self._ws_callbacks):
             try:
                 self._loop.call_soon_threadsafe(callback, item)
-            except Exception:
-                pass
+            except RuntimeError as e:
+                logger.warning("[watcher] callback scheduling failed: %s", e)
 
     def add_ws_callback(self, cb) -> None:
         self._ws_callbacks.append(cb)
 
     def remove_ws_callback(self, cb) -> None:
-        self._ws_callbacks.discard(cb) if hasattr(self._ws_callbacks, 'discard') else None
-        if cb in self._ws_callbacks:
+        try:
             self._ws_callbacks.remove(cb)
+        except ValueError:
+            pass
 
 
 class FileWatcher:

@@ -34,8 +34,8 @@ async def scan_and_summarize(req: ScanRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Build context for AI
-    project_context = build_project_context(req.workspace_path)
+    # Reuse the already-scanned ctx — avoids a second full directory walk
+    project_context = build_project_context(req.workspace_path, ctx=ctx)
 
     try:
         provider = get_provider(req.provider, api_key=req.api_key)
@@ -52,5 +52,5 @@ async def scan_and_summarize(req: ScanRequest):
         file_count=ctx["file_count"],
         language_breakdown=ctx["language_breakdown"],
         dependencies=ctx["dependencies"],
-        readme_preview=ctx["readme"][:1500],
+        readme_preview=ctx["readme"][:1500] if ctx["readme"] else "",
     )

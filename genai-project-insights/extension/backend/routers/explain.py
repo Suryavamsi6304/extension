@@ -1,7 +1,14 @@
+import json
+import logging
+import re
 from fastapi import APIRouter, HTTPException
 from models.requests import ExplainRequest
 from models.responses import ExplainResult
 from providers.factory import get_provider
+
+logger = logging.getLogger(__name__)
+
+MAX_CODE_CHARS = 8_000
 
 router = APIRouter()
 
@@ -32,7 +39,7 @@ File: {req.file_path or 'unknown'}
 
 Code to explain:
 ```{req.language}
-{req.code}
+{req.code[:MAX_CODE_CHARS]}
 ```"""
 
     try:
@@ -44,15 +51,9 @@ Code to explain:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI provider error: {e}")
 
-    # Parse JSON response
-    import json, re
     try:
-        # Extract JSON even if model wraps it in markdown
         json_match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-        else:
-            data = json.loads(raw)
+        data = json.loads(json_match.group() if json_match else raw)
 
         return ExplainResult(
             explanation=data.get("explanation", raw),

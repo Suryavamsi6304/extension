@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from models.requests import ChatRequest
 from providers.factory import get_provider
@@ -25,12 +25,18 @@ Guidelines:
 
 @router.post("")
 async def chat(req: ChatRequest):
-    context = build_project_context(req.workspace_path)
-    provider = get_provider(req.provider, api_key=req.api_key)
+    try:
+        context = build_project_context(req.workspace_path, include_file_contents=True)
+        provider = get_provider(req.provider, api_key=req.api_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Setup error: {e}")
 
-    system_prompt = CHAT_SYSTEM_TEMPLATE.format(
-        workspace_path=req.workspace_path,
-        context=context,
+    system_prompt = (
+        CHAT_SYSTEM_TEMPLATE
+        .replace("{workspace_path}", req.workspace_path)
+        .replace("{context}", context)
     )
 
     history = [{"role": m.role, "content": m.content} for m in req.history]

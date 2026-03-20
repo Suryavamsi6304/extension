@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ScanRequest(BaseModel):
@@ -12,7 +12,6 @@ class ExplainRequest(BaseModel):
     language: str = "python"
     file_path: str = ""
     provider: str | None = None
-    # Override API key for this request
     api_key: str | None = None
 
 
@@ -24,7 +23,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     workspace_path: str
-    history: list[ChatMessage] = []
+    history: list[ChatMessage] = Field(default_factory=list)
     provider: str | None = None
     api_key: str | None = None
 

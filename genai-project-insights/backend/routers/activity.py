@@ -1,8 +1,10 @@
 import asyncio
 import json
+import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from services.watcher import file_watcher
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -14,7 +16,7 @@ async def get_recent_activity(limit: int = Query(50, ge=1, le=200)):
 
 @router.post("/watch")
 async def start_watching(workspace_path: str):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     file_watcher.start(workspace_path, loop)
     return {"status": "watching", "path": workspace_path}
 
@@ -40,7 +42,7 @@ async def activity_websocket(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "heartbeat"}))
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[activity_ws] error: %s", e)
     finally:
         file_watcher.unsubscribe(on_activity)

@@ -35,6 +35,14 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatPanel = void 0;
 const vscode = __importStar(require("vscode"));
+function getNonce() {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+}
 class ChatPanel {
     constructor(panel, client, workspacePath) {
         this.disposables = [];
@@ -58,6 +66,7 @@ class ChatPanel {
         return ChatPanel.currentPanel;
     }
     handleMessage(msg) {
+        console.log('[ChatPanel] handleMessage received:', msg.type, msg.message);
         if (msg.type === "send" && msg.message) {
             this.sendMessage(msg.message);
         }
@@ -83,10 +92,12 @@ class ChatPanel {
     }
     getHtml() {
         const workspaceShort = this.workspacePath.split(/[/\\]/).pop() || this.workspacePath;
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -120,10 +131,10 @@ class ChatPanel {
       padding: 10px 14px;
       border-radius: 8px;
       line-height: 1.5;
-      white-space: pre-wrap;
       word-wrap: break-word;
     }
     .message.user {
+      white-space: pre-wrap;
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
       align-self: flex-end;
@@ -135,6 +146,14 @@ class ChatPanel {
       align-self: flex-start;
       border-radius: 8px 8px 8px 2px;
     }
+    .message.assistant p { margin: 4px 0; }
+    .message.assistant ul, .message.assistant ol { padding-left: 20px; margin: 4px 0 8px; }
+    .message.assistant li { margin: 3px 0; }
+    .message.assistant h3 { font-size: 1em; margin: 10px 0 4px; color: var(--vscode-textLink-foreground); }
+    .message.assistant h4 { font-size: 0.95em; margin: 8px 0 4px; }
+    .message.assistant code { background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+    .message.assistant pre { background: var(--vscode-terminal-background); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+    .message.assistant pre code { background: none; padding: 0; font-size: 0.85em; }
     .message.error {
       background: var(--vscode-inputValidation-errorBackground);
       border: 1px solid var(--vscode-inputValidation-errorBorder);
@@ -209,26 +228,27 @@ class ChatPanel {
       <h3>Ask anything about your project</h3>
       <p>I have full context of <strong>${workspaceShort}</strong></p>
       <div class="suggestions">
-        <button class="suggestion-btn" onclick="sendSuggestion(this)">What does this project do?</button>
-        <button class="suggestion-btn" onclick="sendSuggestion(this)">What are the main entry points?</button>
-        <button class="suggestion-btn" onclick="sendSuggestion(this)">What dependencies does this project use?</button>
-        <button class="suggestion-btn" onclick="sendSuggestion(this)">Where should I look to understand the AI pipeline?</button>
+        <button class="suggestion-btn">What does this project do?</button>
+        <button class="suggestion-btn">What are the main entry points?</button>
+        <button class="suggestion-btn">What dependencies does this project use?</button>
+        <button class="suggestion-btn">Where should I look to understand the AI pipeline?</button>
       </div>
     </div>
   </div>
 
   <div class="input-area">
     <textarea id="input" placeholder="Ask about your project..." rows="1"></textarea>
-    <button id="sendBtn" onclick="send()">Send</button>
+    <button id="sendBtn">Send</button>
   </div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const messagesEl = document.getElementById('messages');
     const input = document.getElementById('input');
     const sendBtn = document.getElementById('sendBtn');
     let currentAssistantEl = null;
     let isStreaming = false;
+    let fullResponse = '';
 
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -244,18 +264,25 @@ class ChatPanel {
 
     function send() {
       const text = input.value.trim();
+      console.log('[chat] send() called, text=', text, 'isStreaming=', isStreaming);
       if (!text || isStreaming) return;
+      console.log('[chat] posting message to extension host');
       vscode.postMessage({ type: 'send', message: text });
       input.value = '';
       input.style.height = 'auto';
     }
 
-    function sendSuggestion(btn) {
-      if (isStreaming) return;
-      const text = btn.textContent;
-      vscode.postMessage({ type: 'send', message: text });
-      document.getElementById('welcome').remove();
-    }
+    sendBtn.addEventListener('click', () => { console.log('[chat] sendBtn clicked'); send(); });
+
+    document.querySelectorAll('.suggestion-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (isStreaming) return;
+        const text = btn.textContent;
+        vscode.postMessage({ type: 'send', message: text });
+        const welcome = document.getElementById('welcome');
+        if (welcome) welcome.remove();
+      });
+    });
 
     function scrollToBottom() {
       messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -263,6 +290,7 @@ class ChatPanel {
 
     window.addEventListener('message', (event) => {
       const msg = event.data;
+      console.log('[chat] received message from host:', msg.type);
 
       if (msg.type === 'userMessage') {
         const welcome = document.getElementById('welcome');
@@ -285,12 +313,13 @@ class ChatPanel {
       }
 
       if (msg.type === 'token' && currentAssistantEl) {
+        fullResponse += msg.text;
+        // Show raw text while streaming so user sees progress
         const cursor = currentAssistantEl.querySelector('.cursor');
-        const textNode = document.createTextNode(msg.text);
         if (cursor) {
-          currentAssistantEl.insertBefore(textNode, cursor);
+          cursor.insertAdjacentText('beforebegin', msg.text);
         } else {
-          currentAssistantEl.appendChild(textNode);
+          currentAssistantEl.appendChild(document.createTextNode(msg.text));
         }
         scrollToBottom();
       }
@@ -299,10 +328,12 @@ class ChatPanel {
         isStreaming = false;
         sendBtn.disabled = false;
         if (currentAssistantEl) {
-          const cursor = currentAssistantEl.querySelector('.cursor');
-          if (cursor) cursor.remove();
+          // Replace raw streamed text with rendered markdown
+          currentAssistantEl.innerHTML = renderMarkdown(fullResponse);
         }
+        fullResponse = '';
         currentAssistantEl = null;
+        scrollToBottom();
       }
 
       if (msg.type === 'error') {
@@ -315,6 +346,68 @@ class ChatPanel {
         scrollToBottom();
       }
     });
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function inlineFormat(text) {
+      return escapeHtml(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/\`([^\`]+)\`/g, '<code>$1</code>');
+    }
+
+    function renderMarkdown(text) {
+      const lines = text.split('\n');
+      const html = [];
+      let inList = false;
+      let listTag = 'ul';
+      let inCode = false;
+      let codeLang = '';
+      let codeLines = [];
+
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+
+        // Code fence open/close
+        if (/^\`\`\`/.test(line)) {
+          if (!inCode) {
+            if (inList) { html.push('</' + listTag + '>'); inList = false; }
+            inCode = true;
+            codeLang = line.slice(3).trim();
+            codeLines = [];
+          } else {
+            html.push('<pre><code>' + codeLines.map(escapeHtml).join('\n') + '</code></pre>');
+            inCode = false;
+            codeLines = [];
+          }
+          continue;
+        }
+        if (inCode) { codeLines.push(line); continue; }
+
+        if (/^## (.+)/.test(line)) {
+          if (inList) { html.push('</' + listTag + '>'); inList = false; }
+          html.push('<h3>' + inlineFormat(line.replace(/^## /, '')) + '</h3>');
+        } else if (/^### (.+)/.test(line)) {
+          if (inList) { html.push('</' + listTag + '>'); inList = false; }
+          html.push('<h4>' + inlineFormat(line.replace(/^### /, '')) + '</h4>');
+        } else if (/^[-*] (.+)/.test(line)) {
+          if (!inList || listTag !== 'ul') { if (inList) html.push('</' + listTag + '>'); html.push('<ul>'); inList = true; listTag = 'ul'; }
+          html.push('<li>' + inlineFormat(line.replace(/^[-*] /, '')) + '</li>');
+        } else if (/^\d+\. (.+)/.test(line)) {
+          if (!inList || listTag !== 'ol') { if (inList) html.push('</' + listTag + '>'); html.push('<ol>'); inList = true; listTag = 'ol'; }
+          html.push('<li>' + inlineFormat(line.replace(/^\d+\. /, '')) + '</li>');
+        } else if (line.trim() === '') {
+          if (inList) { html.push('</' + listTag + '>'); inList = false; }
+        } else {
+          if (inList) { html.push('</' + listTag + '>'); inList = false; }
+          html.push('<p>' + inlineFormat(line) + '</p>');
+        }
+      }
+      if (inCode) html.push('<pre><code>' + codeLines.map(escapeHtml).join('\n') + '</code></pre>');
+      if (inList) html.push('</' + listTag + '>');
+      return html.join('\n');
+    }
   </script>
 </body>
 </html>`;
