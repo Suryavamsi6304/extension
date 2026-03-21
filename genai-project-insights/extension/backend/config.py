@@ -8,10 +8,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(_ENV_PATH),
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
-    # AI provider selection: gemini | pluralsight
-    ai_provider: str = "pluralsight"
+    # AI provider selection: groq | gemini | pluralsight
+    ai_provider: str = "groq"
+
+    # Groq
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
 
     # Gemini
     gemini_api_key: str = ""

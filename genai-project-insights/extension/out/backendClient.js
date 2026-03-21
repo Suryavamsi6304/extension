@@ -47,6 +47,7 @@ class BackendClient {
             provider: cfg.get("provider", ""),
             geminiKey: cfg.get("geminiApiKey", ""),
             pluralsightKey: cfg.get("pluralsightApiKey", ""),
+            groqKey: cfg.get("groqApiKey", ""),
         };
     }
     getApiKey(provider) {
@@ -54,6 +55,7 @@ class BackendClient {
         switch (provider) {
             case "gemini": return cfg.geminiKey;
             case "pluralsight": return cfg.pluralsightKey;
+            case "groq": return cfg.groqKey;
             default: return "";
         }
     }

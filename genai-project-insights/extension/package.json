@@ -130,16 +130,22 @@
       "properties": {
         "genai.provider": {
           "type": "string",
-          "enum": ["pluralsight", "anthropic", "openai", "gemini", "ollama"],
+          "enum": ["groq", "gemini", "pluralsight", "anthropic", "openai", "ollama"],
           "enumDescriptions": [
+            "Groq — fast inference (llama-3.3-70b), requires API key from console.groq.com",
+            "Google Gemini — requires API key from aistudio.google.com",
             "Pluralsight Prompt Sandbox (recommended for corporate environments)",
             "Anthropic Claude — requires API key from console.anthropic.com",
             "OpenAI GPT-4o — requires API key from platform.openai.com",
-            "Google Gemini — requires API key from aistudio.google.com",
             "Ollama — local models, no API key needed"
           ],
-          "default": "pluralsight",
+          "default": "groq",
           "description": "AI provider to use for all analysis features"
+        },
+        "genai.groqApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Groq API key. Get one at console.groq.com"
         },
         "genai.pluralsightApiKey": {
           "type": "string",

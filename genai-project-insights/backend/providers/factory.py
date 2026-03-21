@@ -1,6 +1,7 @@
 import logging
 from .base import AIProvider
 from .gemini_provider import GeminiProvider
+from .groq_provider import GroqProvider
 from .pluralsight_provider import PluralsightProvider
 from config import get_settings
 
@@ -30,8 +31,12 @@ def get_provider(
             key = api_key or settings.pluralsight_api_key
             return PluralsightProvider(api_key=key, model=settings.pluralsight_model)
 
+        case "groq":
+            key = api_key or settings.groq_api_key
+            return GroqProvider(api_key=key, model=settings.groq_model)
+
         case _:
             raise ValueError(
                 f"Unknown AI provider: '{provider_name}'. "
-                f"Valid options: gemini, pluralsight"
+                f"Valid options: gemini, pluralsight, groq"
             )

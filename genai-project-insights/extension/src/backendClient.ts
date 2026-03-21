@@ -26,6 +26,7 @@ export class BackendClient {
       provider: cfg.get<string>("provider", ""),
       geminiKey: cfg.get<string>("geminiApiKey", ""),
       pluralsightKey: cfg.get<string>("pluralsightApiKey", ""),
+      groqKey: cfg.get<string>("groqApiKey", ""),
     };
   }
 
@@ -34,6 +35,7 @@ export class BackendClient {
     switch (provider) {
       case "gemini": return cfg.geminiKey;
       case "pluralsight": return cfg.pluralsightKey;
+      case "groq": return cfg.groqKey;
       default: return "";
     }
   }

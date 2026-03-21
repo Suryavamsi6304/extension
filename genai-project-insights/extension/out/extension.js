@@ -167,7 +167,7 @@ async function activate(context) {
     }));
     // 6. Switch Provider
     context.subscriptions.push(vscode.commands.registerCommand("genai.pickProvider", async () => {
-        const providers = ["anthropic", "openai", "gemini", "ollama", "pluralsight"];
+        const providers = ["groq", "gemini", "pluralsight", "anthropic", "openai", "ollama"];
         const current = vscode.workspace.getConfiguration("genai").get("provider", "pluralsight");
         const picked = await vscode.window.showQuickPick(providers.map(p => ({
             label: p,
