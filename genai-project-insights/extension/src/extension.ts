@@ -23,8 +23,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const port = cfg.get<number>("backendPort", 8765);
   const autoStart = cfg.get<boolean>("autoStartBackend", true);
 
-  // Create client
-  client = new BackendClient(port, outputChannel);
+  // Ensure the active provider's API key is stored securely on first run
+  const activeProvider = cfg.get<string>("provider", "groq");
+  await ensureProviderKey(context.secrets, activeProvider);
+
+  // Create client (secrets passed in — keys never read from workspace settings)
+  client = new BackendClient(port, outputChannel, context.secrets);
 
   // Status bar
   statusBarItem = vscode.window.createStatusBarItem(
@@ -175,8 +179,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 6. Switch Provider
   context.subscriptions.push(
     vscode.commands.registerCommand("genai.pickProvider", async () => {
-      const providers = ["groq", "gemini", "pluralsight", "anthropic", "openai", "ollama"];
-      const current = vscode.workspace.getConfiguration("genai").get<string>("provider", "pluralsight");
+      const providers = ["groq", "gemini", "pluralsight"];
+      const current = vscode.workspace.getConfiguration("genai").get<string>("provider", "groq");
 
       const picked = await vscode.window.showQuickPick(
         providers.map(p => ({
@@ -193,6 +197,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           picked.label,
           vscode.ConfigurationTarget.Global
         );
+        await ensureProviderKey(context.secrets, picked.label);
         setStatusBar("ready");
         vscode.window.showInformationMessage(
           `GenAI: Switched to ${picked.label}`
@@ -212,6 +217,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch (err) {
         setStatusBar("error");
         vscode.window.showErrorMessage(`GenAI: Failed to start backend: ${err}`);
+      }
+    })
+  );
+
+  // 8. Set / Rotate API Key
+  context.subscriptions.push(
+    vscode.commands.registerCommand("genai.setApiKey", async () => {
+      const providers = ["groq", "gemini", "pluralsight"];
+      const provider = await vscode.window.showQuickPick(providers, {
+        title: "GenAI: Set API Key",
+        placeHolder: "Select a provider to set or rotate its API key",
+      });
+      if (!provider) { return; }
+
+      const input = await vscode.window.showInputBox({
+        title: `GenAI: ${provider} API Key`,
+        prompt: `Enter your ${provider} API key (it will be stored in VS Code SecretStorage, never in plaintext)`,
+        password: true,
+        ignoreFocusOut: true,
+        placeHolder: `Paste your ${provider} API key here`,
+      });
+
+      if (input?.trim()) {
+        await context.secrets.store(`${provider}-api-key`, input.trim());
+        vscode.window.showInformationMessage(`GenAI: ${provider} API key saved securely.`);
       }
     })
   );
@@ -237,10 +267,34 @@ function ensureClient(): boolean {
   return true;
 }
 
+/**
+ * If the provider requires an API key and none is stored yet, prompt the user
+ * once and persist it to VS Code SecretStorage (OS keychain — never plaintext).
+ */
+async function ensureProviderKey(
+  secrets: vscode.SecretStorage,
+  provider: string
+): Promise<void> {
+  const existing = await secrets.get(`${provider}-api-key`);
+  if (existing) { return; }
+
+  const input = await vscode.window.showInputBox({
+    title: `GenAI: ${provider} API Key Required`,
+    prompt: `Enter your ${provider} API key. It will be stored securely in VS Code SecretStorage.`,
+    password: true,
+    ignoreFocusOut: true,
+    placeHolder: `Paste your ${provider} API key here`,
+  });
+
+  if (input?.trim()) {
+    await secrets.store(`${provider}-api-key`, input.trim());
+  }
+}
+
 function setStatusBar(state: "starting" | "ready" | "error" | "stopped"): void {
   if (!statusBarItem) return;
   const cfg = vscode.workspace.getConfiguration("genai");
-  const provider = cfg.get<string>("provider", "anthropic");
+  const provider = cfg.get<string>("provider", "groq");
 
   switch (state) {
     case "starting":

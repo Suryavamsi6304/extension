@@ -14,7 +14,7 @@ def get_provider(
 ) -> AIProvider:
     """
     Return an AIProvider instance for the given provider name.
-    Supported: gemini | pluralsight
+    Supported: groq | gemini | pluralsight
     api_key overrides the configured key (for per-request key injection).
     """
     settings = get_settings()
@@ -25,18 +25,21 @@ def get_provider(
     match provider_name:
         case "gemini":
             key = api_key or settings.gemini_api_key
-            return GeminiProvider(api_key=key, model=settings.gemini_model)
+            provider = GeminiProvider(api_key=key, model=settings.gemini_model)
 
         case "pluralsight":
             key = api_key or settings.pluralsight_api_key
-            return PluralsightProvider(api_key=key, model=settings.pluralsight_model)
+            provider = PluralsightProvider(api_key=key, model=settings.pluralsight_model)
 
         case "groq":
             key = api_key or settings.groq_api_key
-            return GroqProvider(api_key=key, model=settings.groq_model)
+            provider = GroqProvider(api_key=key, model=settings.groq_model)
 
         case _:
             raise ValueError(
                 f"Unknown AI provider: '{provider_name}'. "
                 f"Valid options: gemini, pluralsight, groq"
             )
+
+    provider.validate()
+    return provider

@@ -26,7 +26,7 @@ def _fingerprint(text: str) -> str:
 
 
 class GeminiProvider(AIProvider):
-    DEFAULT_MODEL = "gemini-1.5-pro"
+    DEFAULT_MODEL = "gemini-2.0-flash"
 
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, cache_ttl: int = 300):
         self.api_key = api_key

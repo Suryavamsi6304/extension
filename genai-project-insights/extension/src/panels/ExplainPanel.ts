@@ -51,6 +51,7 @@ export class ExplainPanel {
     const fileName = filePath.split(/[/\\]/).pop() || filePath;
     return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
 <style>
   body { font-family: var(--vscode-font-family); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); display: flex; align-items: center; justify-content: center; height: 100vh; }
   .spinner { width: 32px; height: 32px; border: 3px solid var(--vscode-panel-border); border-top-color: var(--vscode-button-background); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px; }
@@ -62,6 +63,7 @@ export class ExplainPanel {
 
   private getErrorHtml(error: string): string {
     return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
 <style>body { font-family: var(--vscode-font-family); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); padding: 20px; } .error { background: var(--vscode-inputValidation-errorBackground); padding: 16px; border-radius: 4px; }</style>
 </head><body><div class="error"><h3>Error</h3><pre>${escapeHtml(error)}</pre></div></body></html>`;
   }
@@ -93,6 +95,7 @@ export class ExplainPanel {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
   <style>
     * { box-sizing: border-box; }
     body {

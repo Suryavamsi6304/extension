@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import * as http from "http";
-import * as https from "https";
 import type {
   ProjectOverview,
   ExplainResult,
@@ -14,30 +13,22 @@ import type {
 export class BackendClient {
   private baseUrl: string;
   private outputChannel: vscode.OutputChannel;
+  private secrets: vscode.SecretStorage;
+  private _activeStreamReq: http.ClientRequest | null = null;
+  private static readonly REQUEST_TIMEOUT_MS = 30_000;
 
-  constructor(port: number, outputChannel: vscode.OutputChannel) {
+  constructor(port: number, outputChannel: vscode.OutputChannel, secrets: vscode.SecretStorage) {
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.outputChannel = outputChannel;
+    this.secrets = secrets;
   }
 
-  private getConfig() {
-    const cfg = vscode.workspace.getConfiguration("genai");
-    return {
-      provider: cfg.get<string>("provider", ""),
-      geminiKey: cfg.get<string>("geminiApiKey", ""),
-      pluralsightKey: cfg.get<string>("pluralsightApiKey", ""),
-      groqKey: cfg.get<string>("groqApiKey", ""),
-    };
+  private getProvider(): string {
+    return vscode.workspace.getConfiguration("genai").get<string>("provider", "groq");
   }
 
-  private getApiKey(provider: string): string {
-    const cfg = this.getConfig();
-    switch (provider) {
-      case "gemini": return cfg.geminiKey;
-      case "pluralsight": return cfg.pluralsightKey;
-      case "groq": return cfg.groqKey;
-      default: return "";
-    }
+  private async resolveApiKey(provider: string): Promise<string> {
+    return (await this.secrets.get(`${provider}-api-key`)) ?? "";
   }
 
   private async fetchJson<T>(
@@ -45,7 +36,7 @@ export class BackendClient {
     path: string,
     body?: unknown
   ): Promise<T> {
-    return new Promise((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const bodyStr = body ? JSON.stringify(body) : undefined;
       const url = new URL(this.baseUrl + path);
 
@@ -54,6 +45,7 @@ export class BackendClient {
         port: url.port,
         path: url.pathname + url.search,
         method,
+        timeout: BackendClient.REQUEST_TIMEOUT_MS,
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
@@ -66,16 +58,30 @@ export class BackendClient {
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
           try {
-            resolve(JSON.parse(data) as T);
+            const parsed = JSON.parse(data);
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new Error(parsed?.error ?? parsed?.detail ?? `HTTP ${res.statusCode}`));
+            } else {
+              resolve(parsed as T);
+            }
           } catch {
             reject(new Error(`Invalid JSON response: ${data.slice(0, 200)}`));
           }
         });
       });
 
+      req.on("timeout", () => {
+        req.destroy();
+        reject(new Error(`Request to ${method} ${path} timed out after ${BackendClient.REQUEST_TIMEOUT_MS / 1000}s`));
+      });
       req.on("error", reject);
       if (bodyStr) req.write(bodyStr);
       req.end();
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.outputChannel.appendLine(`[BackendClient] ${method} ${path} failed: ${msg}`);
+      vscode.window.showErrorMessage(`GenAI Insights: ${msg}`);
+      throw err;
     });
   }
 
@@ -88,9 +94,8 @@ export class BackendClient {
   }
 
   async scanProject(workspacePath: string): Promise<ProjectOverview> {
-    const cfg = this.getConfig();
-    const provider = cfg.provider || null;
-    const api_key = provider ? this.getApiKey(provider) || null : null;
+    const provider = this.getProvider() || null;
+    const api_key = provider ? await this.resolveApiKey(provider) || null : null;
     return this.fetchJson<ProjectOverview>("POST", "/project/scan", {
       workspace_path: workspacePath,
       provider,
@@ -103,9 +108,8 @@ export class BackendClient {
     language: string,
     filePath: string
   ): Promise<ExplainResult> {
-    const cfg = this.getConfig();
-    const provider = cfg.provider || null;
-    const api_key = provider ? this.getApiKey(provider) || null : null;
+    const provider = this.getProvider() || null;
+    const api_key = provider ? await this.resolveApiKey(provider) || null : null;
     return this.fetchJson<ExplainResult>("POST", "/explain", {
       code,
       language,
@@ -116,9 +120,8 @@ export class BackendClient {
   }
 
   async getGitInsights(workspacePath: string): Promise<GitInsights> {
-    const cfg = this.getConfig();
-    const provider = cfg.provider || null;
-    const api_key = provider ? this.getApiKey(provider) || null : null;
+    const provider = this.getProvider() || null;
+    const api_key = provider ? await this.resolveApiKey(provider) || null : null;
     return this.fetchJson<GitInsights>("POST", "/git/insights", {
       workspace_path: workspacePath,
       provider,
@@ -145,7 +148,7 @@ export class BackendClient {
   }
 
   /**
-   * Stream chat via SSE — yields tokens as they arrive.
+   * Stream chat via SSE — yields tokens as they arrive (true streaming).
    * Returns an async generator that must be consumed.
    */
   async *chatStream(
@@ -153,9 +156,8 @@ export class BackendClient {
     workspacePath: string,
     history: ChatMessage[]
   ): AsyncGenerator<string> {
-    const cfg = this.getConfig();
-    const provider = cfg.provider || null;
-    const api_key = provider ? this.getApiKey(provider) || null : null;
+    const provider = this.getProvider() || null;
+    const api_key = provider ? await this.resolveApiKey(provider) || null : null;
     const body = JSON.stringify({
       message,
       workspace_path: workspacePath,
@@ -164,48 +166,55 @@ export class BackendClient {
       api_key,
     });
 
-    const buffer = await new Promise<string>((resolve, reject) => {
-      const url = new URL(this.baseUrl + "/chat");
-      const options: http.RequestOptions = {
-        hostname: url.hostname,
-        port: url.port,
-        path: url.pathname,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "text/event-stream",
-          "Content-Length": Buffer.byteLength(body),
-        },
-      };
+    const url = new URL(this.baseUrl + "/chat");
+    const options: http.RequestOptions = {
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
 
-      let fullBuffer = "";
-      const req = http.request(options, (res) => {
-        res.on("data", (chunk: Buffer) => {
-          fullBuffer += chunk.toString();
-        });
-        res.on("end", () => resolve(fullBuffer));
-        res.on("error", reject);
+    // Get the response stream without waiting for it to complete
+    const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
+      const req = http.request(options, resolve);
+      req.setTimeout(BackendClient.REQUEST_TIMEOUT_MS, () => {
+        req.destroy();
+        reject(new Error("Chat stream connection timed out"));
       });
       req.on("error", reject);
       req.write(body);
       req.end();
     });
 
-    // Parse SSE events from buffer
-    const lines = buffer.split("\n");
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") break;
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.token) {
-            yield parsed.token as string;
-          } else if (parsed.error) {
-            throw new Error(parsed.error);
+    // Process chunks as they arrive — true streaming
+    let partial = "";
+    for await (const chunk of res as AsyncIterable<Buffer>) {
+      partial += chunk.toString();
+      const lines = partial.split("\n");
+      partial = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") return;
+          // Separate JSON parse errors from application errors
+          let parsed: { token?: string; error?: string } | null = null;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            continue; // Skip malformed SSE lines
           }
-        } catch {
-          // Skip malformed lines
+          if (parsed?.error) {
+            throw new Error(parsed.error); // Propagate backend errors
+          }
+          if (parsed?.token) {
+            yield parsed.token;
+          }
         }
       }
     }
@@ -223,9 +232,27 @@ export class BackendClient {
     onDone: () => void,
     onError: (error: Error) => void
   ): void {
-    const cfg = this.getConfig();
-    const provider = cfg.provider || null;
-    const api_key = provider ? this.getApiKey(provider) || null : null;
+    this._doStream(message, workspacePath, history, onToken, onDone, onError).catch(onError);
+  }
+
+  /** Cancel the active SSE stream (e.g. when the chat panel is disposed). */
+  cancelChatStream(): void {
+    if (this._activeStreamReq) {
+      this._activeStreamReq.destroy();
+      this._activeStreamReq = null;
+    }
+  }
+
+  private async _doStream(
+    message: string,
+    workspacePath: string,
+    history: ChatMessage[],
+    onToken: (token: string) => void,
+    onDone: () => void,
+    onError: (error: Error) => void
+  ): Promise<void> {
+    const provider = this.getProvider() || null;
+    const api_key = provider ? await this.resolveApiKey(provider) || null : null;
     const body = JSON.stringify({
       message,
       workspace_path: workspacePath,
@@ -248,7 +275,7 @@ export class BackendClient {
     };
 
     let doneCalled = false;
-    const callDoneOnce = () => { if (!doneCalled) { doneCalled = true; onDone(); } };
+    const callDoneOnce = () => { if (!doneCalled) { doneCalled = true; this._activeStreamReq = null; onDone(); } };
 
     const req = http.request(options, (res) => {
       let partial = "";
@@ -280,10 +307,18 @@ export class BackendClient {
       });
 
       res.on("end", callDoneOnce);
-      res.on("error", onError);
+      res.on("error", (err) => {
+        this._activeStreamReq = null;
+        onError(err);
+      });
     });
 
-    req.on("error", onError);
+    req.on("error", (err) => {
+      this._activeStreamReq = null;
+      onError(err);
+    });
+
+    this._activeStreamReq = req;
     req.write(body);
     req.end();
   }

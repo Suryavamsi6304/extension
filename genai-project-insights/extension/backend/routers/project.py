@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from models.requests import ScanRequest
+from models.requests import ScanRequest, MAX_CONTEXT_CHARS
 from models.responses import ProjectOverview
 from services.scanner import scan_project
 from services.context_builder import build_project_context
@@ -36,6 +36,7 @@ async def scan_and_summarize(req: ScanRequest):
 
     # Reuse the already-scanned ctx — avoids a second full directory walk
     project_context = build_project_context(req.workspace_path, ctx=ctx)
+    project_context = project_context[:MAX_CONTEXT_CHARS]
 
     try:
         provider = get_provider(req.provider, api_key=req.api_key)

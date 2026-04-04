@@ -8,8 +8,6 @@ from providers.factory import get_provider
 
 logger = logging.getLogger(__name__)
 
-MAX_CODE_CHARS = 8_000
-
 router = APIRouter()
 
 EXPLAIN_SYSTEM_PROMPT = """You are an expert code analyst specializing in explaining code to GenAI developers.
@@ -39,7 +37,7 @@ File: {req.file_path or 'unknown'}
 
 Code to explain:
 ```{req.language}
-{req.code[:MAX_CODE_CHARS]}
+{req.code}
 ```"""
 
     try:
@@ -51,21 +49,43 @@ Code to explain:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI provider error: {e}")
 
-    try:
-        json_match = re.search(r'\{.*\}', raw, re.DOTALL)
-        data = json.loads(json_match.group() if json_match else raw)
+    data = _extract_json(raw)
+    return ExplainResult(
+        explanation=data.get("explanation", raw),
+        complexity=data.get("complexity", "Medium"),
+        key_points=data.get("key_points", []),
+        suggestions=data.get("suggestions", []),
+    )
 
-        return ExplainResult(
-            explanation=data.get("explanation", raw),
-            complexity=data.get("complexity", "Medium"),
-            key_points=data.get("key_points", []),
-            suggestions=data.get("suggestions", []),
-        )
-    except (json.JSONDecodeError, KeyError):
-        # Fallback: return raw text as explanation
-        return ExplainResult(
-            explanation=raw,
-            complexity="Medium",
-            key_points=[],
-            suggestions=[],
-        )
+
+def _extract_json(raw: str) -> dict:
+    """Extract a JSON object from raw text using bracket-counting (handles nested objects)."""
+    # First try: direct parse (AI returned pure JSON)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Second try: strip markdown code fences then parse
+    stripped = re.sub(r"```(?:json)?\n?", "", raw).strip()
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+
+    # Third try: find the outermost {...} using bracket counting
+    start = raw.find("{")
+    if start == -1:
+        return {}
+    depth = 0
+    for i, ch in enumerate(raw[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(raw[start : i + 1])
+                except json.JSONDecodeError:
+                    break
+    return {}

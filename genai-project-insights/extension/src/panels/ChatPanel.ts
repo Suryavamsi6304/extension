@@ -446,6 +446,7 @@ export class ChatPanel {
 
   public dispose(): void {
     ChatPanel.currentPanel = undefined;
+    this._client.cancelChatStream();
     this._panel.dispose();
     while (this._disposables.length) {
       const d = this._disposables.pop();

@@ -20,7 +20,7 @@ GenAI Project Insights is a VS Code extension that connects your workspace to an
 | **Git Insights** | `GenAI: Show Git Insights` | AI summary of recent commits and development activity |
 | **TODO Scanner** | `GenAI: Find & List TODOs` | Finds all TODOs, FIXMEs, BUGs, HACKs across the project |
 | **Activity Monitor** | Sidebar | Live feed of file changes in your workspace |
-| **Provider Switcher** | `GenAI: Switch AI Provider` | Switch between Pluralsight, OpenAI, Anthropic, Gemini, or Ollama |
+| **Provider Switcher** | `GenAI: Switch AI Provider` | Switch between Groq, Gemini, or Pluralsight |
 
 ---
 
@@ -28,11 +28,9 @@ GenAI Project Insights is a VS Code extension that connects your workspace to an
 
 | Provider | Model | Requires Key |
 |---|---|---|
-| **Pluralsight** *(default)* | ChatGPT-4o, Claude, Llama, Titan, Jamba | Pluralsight Sandbox key |
-| **OpenAI** | GPT-4o | Yes — [platform.openai.com](https://platform.openai.com) |
-| **Anthropic** | Claude Opus | Yes — [console.anthropic.com](https://console.anthropic.com) |
-| **Google Gemini** | Gemini 1.5 Pro | Yes — [aistudio.google.com](https://aistudio.google.com) |
-| **Ollama** | Any local model | No — runs locally |
+| **Groq** *(default)* | llama-3.3-70b-versatile | Yes — [console.groq.com](https://console.groq.com) |
+| **Google Gemini** | Gemini 2.0 Flash | Yes — [aistudio.google.com](https://aistudio.google.com) |
+| **Pluralsight** | ChatGPT-4o, Claude, Llama, Titan, Jamba | Pluralsight Sandbox key |
 
 ---
 
@@ -109,11 +107,9 @@ genai-project-insights/
 │   ├── requirements.txt            # Python dependencies
 │   ├── .env                        # API keys and config
 │   ├── providers/                  # AI provider adapters
-│   │   ├── pluralsight_provider.py # Pluralsight Prompt Sandbox
-│   │   ├── openai_provider.py      # OpenAI GPT
-│   │   ├── anthropic_provider.py   # Anthropic Claude
+│   │   ├── groq_provider.py        # Groq (default)
 │   │   ├── gemini_provider.py      # Google Gemini
-│   │   └── ollama_provider.py      # Ollama (local)
+│   │   └── pluralsight_provider.py # Pluralsight Prompt Sandbox
 │   ├── routers/                    # API route handlers
 │   │   ├── project.py              # /project/scan
 │   │   ├── explain.py              # /explain
@@ -170,14 +166,8 @@ genai-project-insights/
 
 | Setting | Default | Description |
 |---|---|---|
-| `genai.provider` | `pluralsight` | Active AI provider |
-| `genai.pluralsightApiKey` | `""` | Pluralsight Sandbox API key |
+| `genai.provider` | `groq` | Active AI provider |
 | `genai.pluralsightModel` | `chatgpt-4o` | Pluralsight model |
-| `genai.openaiApiKey` | `""` | OpenAI API key |
-| `genai.anthropicApiKey` | `""` | Anthropic API key |
-| `genai.geminiApiKey` | `""` | Google Gemini API key |
-| `genai.ollamaUrl` | `http://localhost:11434` | Ollama server URL |
-| `genai.ollamaModel` | `llama3` | Ollama model name |
 | `genai.backendPort` | `8765` | Python backend port |
 | `genai.autoStartBackend` | `true` | Auto-start backend on VS Code open |
 | `genai.pythonPath` | `""` | Custom Python path (leave empty to auto-detect) |
@@ -209,7 +199,7 @@ VS Code Extension (TypeScript)
         ↓
 Python Backend (FastAPI — runs locally)
         ↓
-AI Provider (Pluralsight / OpenAI / Anthropic / Gemini / Ollama)
+AI Provider (Groq / Gemini / Pluralsight)
         ↓
 Response rendered in VS Code webview panel
 ```

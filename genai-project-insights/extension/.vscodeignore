@@ -4,12 +4,25 @@ src/**
 node_modules/**
 *.vsix
 tsconfig.json
+esbuild.mjs
+jest.config.js
 .eslintrc*
 .prettierrc*
 **/*.map
 **/*.ts
-!out/**
+out/**
+!dist/**
+
+# Backend dev / test artifacts
 backend/__pycache__/**
 backend/**/__pycache__/**
 backend/**/*.pyc
 backend/.env
+backend/.venv/**
+backend/tests/**
+backend/.pytest_cache/**
+backend/**/.pytest_cache/**
+
+# OS / editor junk
+.DS_Store
+Thumbs.db

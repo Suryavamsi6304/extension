@@ -1,7 +1,7 @@
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from models.requests import ChatRequest
+from models.requests import ChatRequest, MAX_CONTEXT_CHARS
 from providers.factory import get_provider
 from services.context_builder import build_project_context
 
@@ -24,9 +24,10 @@ Guidelines:
 
 
 @router.post("")
-async def chat(req: ChatRequest):
+async def chat(request: Request, req: ChatRequest):
     try:
         context = build_project_context(req.workspace_path, include_file_contents=True)
+        context = context[:MAX_CONTEXT_CHARS]
         provider = get_provider(req.provider, api_key=req.api_key)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -41,13 +42,15 @@ async def chat(req: ChatRequest):
 
     history = [{"role": m.role, "content": m.content} for m in req.history]
 
-    async def event_stream():
+    async def event_generator():
         try:
             async for token in provider.stream_chat(
                 system_prompt=system_prompt,
                 user_message=req.message,
                 history=history,
             ):
+                if await request.is_disconnected():
+                    break  # client closed — stop generating, save tokens
                 yield f"data: {json.dumps({'token': token})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -55,7 +58,7 @@ async def chat(req: ChatRequest):
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(
-        event_stream(),
+        event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

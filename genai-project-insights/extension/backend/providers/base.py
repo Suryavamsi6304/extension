@@ -6,6 +6,16 @@ class AIProvider(ABC):
     """Abstract base class for all AI provider implementations."""
 
     @abstractmethod
+    def validate(self) -> None:
+        """
+        Raise ValueError with a clear, actionable message if the provider
+        cannot be used (e.g. API key missing or obviously malformed).
+        Must be synchronous and free of network I/O — called on every
+        get_provider() call and once at startup.
+        """
+        ...
+
+    @abstractmethod
     async def stream_chat(
         self,
         system_prompt: str,
@@ -16,7 +26,12 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
-    async def complete(self, system_prompt: str, user_message: str) -> str:
+    async def complete(
+        self,
+        system_prompt: str,
+        user_message: str,
+        history: list[dict] | None = None,
+    ) -> str:
         """Return a full non-streaming completion."""
         ...
 

@@ -10,6 +10,7 @@ from google import genai
 from google.genai import types
 from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
 from cachetools import TTLCache
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception, before_sleep_log
 
 from .base import AIProvider
 
@@ -17,8 +18,11 @@ logger = logging.getLogger(__name__)
 
 _CACHE: TTLCache = TTLCache(maxsize=128, ttl=300)
 _RETRY_EXCEPTIONS = (ResourceExhausted, ServiceUnavailable)
-_MAX_RETRIES = 3
-_BACKOFF_BASE = 2.0
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry on Google quota/availability errors and executor timeouts."""
+    return isinstance(exc, (*_RETRY_EXCEPTIONS, asyncio.TimeoutError))
 
 
 def _fingerprint(text: str) -> str:
@@ -26,13 +30,23 @@ def _fingerprint(text: str) -> str:
 
 
 class GeminiProvider(AIProvider):
-    DEFAULT_MODEL = "gemini-1.5-pro"
+    DEFAULT_MODEL = "gemini-2.0-flash"
 
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, cache_ttl: int = 300):
         self.api_key = api_key
         self._model = model
-        _CACHE.ttl = cache_ttl
+        # Do not mutate the module-level _CACHE.ttl — it is shared across all instances
+        # and mutating it here would affect cached entries from previous instances.
         self._client = genai.Client(api_key=api_key)
+
+    def validate(self) -> None:
+        if not self.api_key or not self.api_key.strip():
+            raise ValueError(
+                "Gemini API key is missing. "
+                "Set GEMINI_API_KEY in your .env file, or run "
+                "'GenAI: Set / Rotate API Key' in VS Code. "
+                "Get a key at https://aistudio.google.com"
+            )
 
     @property
     def model_name(self) -> str:
@@ -44,47 +58,45 @@ class GeminiProvider(AIProvider):
             temperature=0.4,
         )
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception(_is_retryable),
+        reraise=True,
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    )
+    async def _generate(self, contents: str | list, max_tokens: int, timeout: float) -> str:
+        """Retried inner call — keeps cache and logging logic out of the retry loop."""
+        loop = asyncio.get_running_loop()
+        # Capture locals so the lambda doesn't close over mutable self attributes
+        model, client, config = self._model, self._client, self._config(max_tokens)
+        response = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model=model, contents=contents, config=config,
+                ),
+            ),
+            timeout=timeout,
+        )
+        return response.text or ""
+
     async def complete(self, system_prompt: str, user_message: str) -> str:
         full_prompt = f"{system_prompt}\n\n{user_message}" if system_prompt else user_message
         fp = _fingerprint(full_prompt)
 
         if fp in _CACHE:
-            logger.info("[gemini] cache hit fingerprint=%s", fp)
+            logger.info("[gemini] cache hit fp=%s", fp)
             return _CACHE[fp]
 
-        loop = asyncio.get_running_loop()
         t0 = time.monotonic()
-
-        for attempt in range(1, _MAX_RETRIES + 1):
-            try:
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self._client.models.generate_content(
-                        model=self._model,
-                        contents=full_prompt,
-                        config=self._config(max_tokens=2048),
-                    ),
-                )
-                latency = time.monotonic() - t0
-                usage = getattr(response, "usage_metadata", None)
-                logger.info(
-                    "[gemini] complete fingerprint=%s latency=%.2fs input_tokens=%s output_tokens=%s",
-                    fp, latency,
-                    getattr(usage, "prompt_token_count", "?"),
-                    getattr(usage, "candidates_token_count", "?"),
-                )
-                result = response.text
-                _CACHE[fp] = result
-                return result
-            except _RETRY_EXCEPTIONS as e:
-                wait = _BACKOFF_BASE ** attempt
-                logger.warning("[gemini] attempt=%d error=%s retrying in %.1fs", attempt, e, wait)
-                await asyncio.sleep(wait)
-            except Exception as e:
-                logger.error("[gemini] complete failed fingerprint=%s error=%s", fp, e)
-                raise
-
-        raise RuntimeError(f"Gemini complete failed after {_MAX_RETRIES} retries")
+        result = await self._generate(full_prompt, max_tokens=2048, timeout=30.0)
+        logger.info(
+            "ai_call provider=gemini model=%s fp=%s chars=%d latency_ms=%d",
+            self._model, fp, len(result), round((time.monotonic() - t0) * 1000),
+        )
+        _CACHE[fp] = result
+        return result
 
     async def stream_chat(
         self,
@@ -103,32 +115,11 @@ class GeminiProvider(AIProvider):
         contents.append(types.Content(role="user", parts=[types.Part(text=full_message)]))
 
         fp = _fingerprint(full_message)
-        loop = asyncio.get_running_loop()
         t0 = time.monotonic()
-
-        for attempt in range(1, _MAX_RETRIES + 1):
-            try:
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self._client.models.generate_content(
-                        model=self._model,
-                        contents=contents,
-                        config=self._config(max_tokens=4096),
-                    ),
-                )
-                text = response.text or ""
-                logger.info(
-                    "[gemini] stream_chat fingerprint=%s latency=%.2fs chars=%d",
-                    fp, time.monotonic() - t0, len(text),
-                )
-                yield text
-                return
-            except _RETRY_EXCEPTIONS as e:
-                wait = _BACKOFF_BASE ** attempt
-                logger.warning("[gemini] stream attempt=%d error=%s retrying in %.1fs", attempt, e, wait)
-                await asyncio.sleep(wait)
-            except Exception as e:
-                logger.error("[gemini] stream_chat failed fingerprint=%s error=%s", fp, e)
-                raise
-
-        raise RuntimeError(f"Gemini stream_chat failed after {_MAX_RETRIES} retries")
+        # _generate carries full retry logic; yield once after it resolves
+        text = await self._generate(contents, max_tokens=4096, timeout=60.0)
+        logger.info(
+            "ai_stream_done provider=gemini model=%s fp=%s chars=%d latency_ms=%d",
+            self._model, fp, len(text), round((time.monotonic() - t0) * 1000),
+        )
+        yield text

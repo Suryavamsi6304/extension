@@ -56,8 +56,11 @@ async function activate(context) {
     const cfg = vscode.workspace.getConfiguration("genai");
     const port = cfg.get("backendPort", 8765);
     const autoStart = cfg.get("autoStartBackend", true);
-    // Create client
-    client = new backendClient_1.BackendClient(port, outputChannel);
+    // Ensure the active provider's API key is stored securely on first run
+    const activeProvider = cfg.get("provider", "groq");
+    await ensureProviderKey(context.secrets, activeProvider);
+    // Create client (secrets passed in — keys never read from workspace settings)
+    client = new backendClient_1.BackendClient(port, outputChannel, context.secrets);
     // Status bar
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.command = "genai.pickProvider";
@@ -168,7 +171,7 @@ async function activate(context) {
     // 6. Switch Provider
     context.subscriptions.push(vscode.commands.registerCommand("genai.pickProvider", async () => {
         const providers = ["groq", "gemini", "pluralsight", "anthropic", "openai", "ollama"];
-        const current = vscode.workspace.getConfiguration("genai").get("provider", "pluralsight");
+        const current = vscode.workspace.getConfiguration("genai").get("provider", "groq");
         const picked = await vscode.window.showQuickPick(providers.map(p => ({
             label: p,
             description: p === current ? "(current)" : "",
@@ -176,6 +179,7 @@ async function activate(context) {
         })), { title: "Select AI Provider", placeHolder: "Choose your AI provider" });
         if (picked) {
             await vscode.workspace.getConfiguration("genai").update("provider", picked.label, vscode.ConfigurationTarget.Global);
+            await ensureProviderKey(context.secrets, picked.label);
             setStatusBar("ready");
             vscode.window.showInformationMessage(`GenAI: Switched to ${picked.label}`);
         }
@@ -191,6 +195,28 @@ async function activate(context) {
         catch (err) {
             setStatusBar("error");
             vscode.window.showErrorMessage(`GenAI: Failed to start backend: ${err}`);
+        }
+    }));
+    // 8. Set / Rotate API Key
+    context.subscriptions.push(vscode.commands.registerCommand("genai.setApiKey", async () => {
+        const providers = ["groq", "gemini", "pluralsight", "anthropic", "openai"];
+        const provider = await vscode.window.showQuickPick(providers, {
+            title: "GenAI: Set API Key",
+            placeHolder: "Select a provider to set or rotate its API key",
+        });
+        if (!provider) {
+            return;
+        }
+        const input = await vscode.window.showInputBox({
+            title: `GenAI: ${provider} API Key`,
+            prompt: `Enter your ${provider} API key (it will be stored in VS Code SecretStorage, never in plaintext)`,
+            password: true,
+            ignoreFocusOut: true,
+            placeHolder: `Paste your ${provider} API key here`,
+        });
+        if (input?.trim()) {
+            await context.secrets.store(`${provider}-api-key`, input.trim());
+            vscode.window.showInformationMessage(`GenAI: ${provider} API key saved securely.`);
         }
     }));
     outputChannel.appendLine("[Extension] GenAI Project Insights activated.");
@@ -210,11 +236,34 @@ function ensureClient() {
     }
     return true;
 }
+/**
+ * If the provider requires an API key and none is stored yet, prompt the user
+ * once and persist it to VS Code SecretStorage (OS keychain — never plaintext).
+ */
+async function ensureProviderKey(secrets, provider) {
+    if (provider === "ollama") {
+        return;
+    } // local model — no key needed
+    const existing = await secrets.get(`${provider}-api-key`);
+    if (existing) {
+        return;
+    }
+    const input = await vscode.window.showInputBox({
+        title: `GenAI: ${provider} API Key Required`,
+        prompt: `Enter your ${provider} API key. It will be stored securely in VS Code SecretStorage.`,
+        password: true,
+        ignoreFocusOut: true,
+        placeHolder: `Paste your ${provider} API key here`,
+    });
+    if (input?.trim()) {
+        await secrets.store(`${provider}-api-key`, input.trim());
+    }
+}
 function setStatusBar(state) {
     if (!statusBarItem)
         return;
     const cfg = vscode.workspace.getConfiguration("genai");
-    const provider = cfg.get("provider", "anthropic");
+    const provider = cfg.get("provider", "groq");
     switch (state) {
         case "starting":
             statusBarItem.text = "$(loading~spin) GenAI: starting...";

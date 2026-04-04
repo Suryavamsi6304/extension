@@ -79,7 +79,13 @@ class ServerManager {
         });
         // Kill existing process if we own it
         if (this.process) {
-            this.process.kill("SIGTERM");
+            // On Windows SIGTERM is not a real signal — kill() without args calls TerminateProcess
+            if (process.platform === "win32") {
+                this.process.kill();
+            }
+            else {
+                this.process.kill("SIGTERM");
+            }
             this.process = null;
             await sleep(500);
         }
@@ -91,13 +97,17 @@ class ServerManager {
     }
     killPortProcess() {
         return new Promise((resolve) => {
-            // On Windows, find and kill process on our port
+            // On Windows, find and kill process on our port.
+            // Do NOT pass shell:true — we are already spawning cmd /c explicitly.
             const cmd = cp.spawn("cmd", [
                 "/c",
                 `for /f "tokens=5" %a in ('netstat -aon ^| findstr :${this.port}') do taskkill /F /PID %a`,
-            ], { shell: true });
-            cmd.on("close", () => resolve());
-            setTimeout(resolve, 2000);
+            ]);
+            const timer = setTimeout(resolve, 2000);
+            cmd.on("close", () => {
+                clearTimeout(timer);
+                resolve();
+            });
         });
     }
     async start() {
@@ -132,6 +142,7 @@ class ServerManager {
         this.process.on("exit", (code) => {
             this.outputChannel.appendLine(`[ServerManager] Backend exited with code ${code}`);
             this._isReady = false;
+            this.process = null;
         });
         this.process.on("error", (err) => {
             this.outputChannel.appendLine(`[ServerManager] Failed to start: ${err.message}`);
@@ -144,6 +155,11 @@ class ServerManager {
         const deadline = Date.now() + timeoutSeconds * 1000;
         while (Date.now() < deadline) {
             await sleep(500);
+            // If the process already exited (exit handler sets this.process = null),
+            // stop polling immediately — readyReject was already called by "error" handler.
+            if (!this.process) {
+                return;
+            }
             const healthy = await this.checkHealth();
             if (healthy) {
                 this._isReady = true;
@@ -152,9 +168,13 @@ class ServerManager {
                 return;
             }
         }
-        const err = new Error(`Backend did not become healthy within ${timeoutSeconds}s. Check the "GenAI Insights Backend" output channel.`);
-        this.readyReject(err);
-        vscode.window.showErrorMessage(`GenAI Insights: ${err.message}`);
+        // Only reject if the process is still running (i.e. the "error" handler
+        // hasn't already rejected the promise and shown its own message).
+        if (this.process) {
+            const err = new Error(`Backend did not become healthy within ${timeoutSeconds}s. Check the "GenAI Insights Backend" output channel.`);
+            this.readyReject(err);
+            vscode.window.showErrorMessage(`GenAI Insights: ${err.message}`);
+        }
     }
     checkHealth() {
         return new Promise((resolve) => {
@@ -175,22 +195,26 @@ class ServerManager {
         if (configured && configured.trim()) {
             return configured.trim();
         }
-        // Try common locations on Windows
-        const candidates = [
-            "python",
-            "python3",
-            "C:\\Python310\\python.exe",
-            `C:\\Users\\${process.env.USERNAME}\\AppData\\Local\\Programs\\Python\\Python310\\python.exe`,
-            `C:\\Users\\${process.env.USERNAME}\\AppData\\Local\\Programs\\Python\\Python311\\python.exe`,
-            `C:\\Users\\${process.env.USERNAME}\\AppData\\Local\\Programs\\Python\\Python312\\python.exe`,
-        ];
-        // Return first found (we'll try 'python' and fall back)
-        return "python";
+        // Prefer the venv bundled with the backend — it has all dependencies
+        const backendDir = path.join(this.extensionPath, "backend");
+        const venvPython = process.platform === "win32"
+            ? path.join(backendDir, ".venv", "Scripts", "python.exe")
+            : path.join(backendDir, ".venv", "bin", "python");
+        if (fs.existsSync(venvPython)) {
+            return venvPython;
+        }
+        // Fall back to system Python
+        return process.platform === "win32" ? "python" : "python3";
     }
     dispose() {
         if (this.process) {
             this.outputChannel.appendLine("[ServerManager] Stopping backend...");
-            this.process.kill("SIGTERM");
+            if (process.platform === "win32") {
+                this.process.kill();
+            }
+            else {
+                this.process.kill("SIGTERM");
+            }
             this.process = null;
         }
     }

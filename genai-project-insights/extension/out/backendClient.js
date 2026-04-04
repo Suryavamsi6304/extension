@@ -37,27 +37,16 @@ exports.BackendClient = void 0;
 const vscode = __importStar(require("vscode"));
 const http = __importStar(require("http"));
 class BackendClient {
-    constructor(port, outputChannel) {
+    constructor(port, outputChannel, secrets) {
         this.baseUrl = `http://127.0.0.1:${port}`;
         this.outputChannel = outputChannel;
+        this.secrets = secrets;
     }
-    getConfig() {
-        const cfg = vscode.workspace.getConfiguration("genai");
-        return {
-            provider: cfg.get("provider", ""),
-            geminiKey: cfg.get("geminiApiKey", ""),
-            pluralsightKey: cfg.get("pluralsightApiKey", ""),
-            groqKey: cfg.get("groqApiKey", ""),
-        };
+    getProvider() {
+        return vscode.workspace.getConfiguration("genai").get("provider", "groq");
     }
-    getApiKey(provider) {
-        const cfg = this.getConfig();
-        switch (provider) {
-            case "gemini": return cfg.geminiKey;
-            case "pluralsight": return cfg.pluralsightKey;
-            case "groq": return cfg.groqKey;
-            default: return "";
-        }
+    async resolveApiKey(provider) {
+        return (await this.secrets.get(`${provider}-api-key`)) ?? "";
     }
     async fetchJson(method, path, body) {
         return new Promise((resolve, reject) => {
@@ -99,9 +88,8 @@ class BackendClient {
         return this.fetchJson("GET", "/providers");
     }
     async scanProject(workspacePath) {
-        const cfg = this.getConfig();
-        const provider = cfg.provider || null;
-        const api_key = provider ? this.getApiKey(provider) || null : null;
+        const provider = this.getProvider() || null;
+        const api_key = provider ? await this.resolveApiKey(provider) || null : null;
         return this.fetchJson("POST", "/project/scan", {
             workspace_path: workspacePath,
             provider,
@@ -109,9 +97,8 @@ class BackendClient {
         });
     }
     async explainCode(code, language, filePath) {
-        const cfg = this.getConfig();
-        const provider = cfg.provider || null;
-        const api_key = provider ? this.getApiKey(provider) || null : null;
+        const provider = this.getProvider() || null;
+        const api_key = provider ? await this.resolveApiKey(provider) || null : null;
         return this.fetchJson("POST", "/explain", {
             code,
             language,
@@ -121,9 +108,8 @@ class BackendClient {
         });
     }
     async getGitInsights(workspacePath) {
-        const cfg = this.getConfig();
-        const provider = cfg.provider || null;
-        const api_key = provider ? this.getApiKey(provider) || null : null;
+        const provider = this.getProvider() || null;
+        const api_key = provider ? await this.resolveApiKey(provider) || null : null;
         return this.fetchJson("POST", "/git/insights", {
             workspace_path: workspacePath,
             provider,
@@ -142,13 +128,12 @@ class BackendClient {
         });
     }
     /**
-     * Stream chat via SSE — yields tokens as they arrive.
+     * Stream chat via SSE — yields tokens as they arrive (true streaming).
      * Returns an async generator that must be consumed.
      */
     async *chatStream(message, workspacePath, history) {
-        const cfg = this.getConfig();
-        const provider = cfg.provider || null;
-        const api_key = provider ? this.getApiKey(provider) || null : null;
+        const provider = this.getProvider() || null;
+        const api_key = provider ? await this.resolveApiKey(provider) || null : null;
         const body = JSON.stringify({
             message,
             workspace_path: workspacePath,
@@ -156,49 +141,50 @@ class BackendClient {
             provider,
             api_key,
         });
-        const buffer = await new Promise((resolve, reject) => {
-            const url = new URL(this.baseUrl + "/chat");
-            const options = {
-                hostname: url.hostname,
-                port: url.port,
-                path: url.pathname,
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "text/event-stream",
-                    "Content-Length": Buffer.byteLength(body),
-                },
-            };
-            let fullBuffer = "";
-            const req = http.request(options, (res) => {
-                res.on("data", (chunk) => {
-                    fullBuffer += chunk.toString();
-                });
-                res.on("end", () => resolve(fullBuffer));
-                res.on("error", reject);
-            });
+        const url = new URL(this.baseUrl + "/chat");
+        const options = {
+            hostname: url.hostname,
+            port: url.port,
+            path: url.pathname,
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "Content-Length": Buffer.byteLength(body),
+            },
+        };
+        // Get the response stream without waiting for it to complete
+        const res = await new Promise((resolve, reject) => {
+            const req = http.request(options, resolve);
             req.on("error", reject);
             req.write(body);
             req.end();
         });
-        // Parse SSE events from buffer
-        const lines = buffer.split("\n");
-        for (const line of lines) {
-            if (line.startsWith("data: ")) {
-                const data = line.slice(6).trim();
-                if (data === "[DONE]")
-                    break;
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.token) {
+        // Process chunks as they arrive — true streaming
+        let partial = "";
+        for await (const chunk of res) {
+            partial += chunk.toString();
+            const lines = partial.split("\n");
+            partial = lines.pop() || "";
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    const data = line.slice(6).trim();
+                    if (data === "[DONE]")
+                        return;
+                    // Separate JSON parse errors from application errors
+                    let parsed = null;
+                    try {
+                        parsed = JSON.parse(data);
+                    }
+                    catch {
+                        continue; // Skip malformed SSE lines
+                    }
+                    if (parsed?.error) {
+                        throw new Error(parsed.error); // Propagate backend errors
+                    }
+                    if (parsed?.token) {
                         yield parsed.token;
                     }
-                    else if (parsed.error) {
-                        throw new Error(parsed.error);
-                    }
-                }
-                catch {
-                    // Skip malformed lines
                 }
             }
         }
@@ -208,9 +194,11 @@ class BackendClient {
      * Calls onToken for each token, onDone when complete.
      */
     chatStreamCallback(message, workspacePath, history, onToken, onDone, onError) {
-        const cfg = this.getConfig();
-        const provider = cfg.provider || null;
-        const api_key = provider ? this.getApiKey(provider) || null : null;
+        this._doStream(message, workspacePath, history, onToken, onDone, onError).catch(onError);
+    }
+    async _doStream(message, workspacePath, history, onToken, onDone, onError) {
+        const provider = this.getProvider() || null;
+        const api_key = provider ? await this.resolveApiKey(provider) || null : null;
         const body = JSON.stringify({
             message,
             workspace_path: workspacePath,

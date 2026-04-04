@@ -16,7 +16,12 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
-    async def complete(self, system_prompt: str, user_message: str) -> str:
+    async def complete(
+        self,
+        system_prompt: str,
+        user_message: str,
+        history: list[dict] | None = None,
+    ) -> str:
         """Return a full non-streaming completion."""
         ...
 
